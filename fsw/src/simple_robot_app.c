@@ -42,11 +42,6 @@
 */
 SimpleRobotAppData_t SimpleRobotAppData;
 
-struct robot_state_st{
-  SimpleRobotAppJointConfig_t state; /**< Twist the robot is currently using **/
-  bool is_robot_moving;
-} lastRobotState;
-
 void HighRateControLoop(void);
 
 /* * * * * * * * * * * * * * * * * * * * * * * * * * * * * * *  * *  * * * * **/
@@ -136,6 +131,13 @@ int32 SimpleRobotAppInit(void)
 
     SimpleRobotAppData.RunStatus = CFE_ES_RunStatus_APP_RUN;
 
+    /*
+     ** Initialize app command execution counters
+     */
+    SimpleRobotAppData.CmdCounter = 0;
+    //SimpleRobotAppData.ErrCounter = 0;
+    SimpleRobotAppData.square_counter = 0;
+    SimpleRobotAppData.hk_counter = 0;
 
     // Initialize telemetry data back to ground
     fillJoints(&SimpleRobotAppData.JointTlm.joint_state, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0);
@@ -326,7 +328,10 @@ void SimpleRobotAppProcessGroundCommand(CFE_SB_Buffer_t *SBBufPtr)
 /*         the software bus                                                   */
 /* * * * * * * * * * * * * * * * * * * * * * * *  * * * * * * *  * *  * * * * */
 int32 SimpleRobotAppReportHousekeeping(const CFE_MSG_CommandHeader_t *Msg)
-{    
+{        
+    SimpleRobotAppData.CmdCounter++;
+    OS_printf("SimpleRobotAppReportHousekeeping reporting: %d\n", SimpleRobotAppData.CmdCounter);
+    
     CFE_SB_TimeStampMsg(&SimpleRobotAppData.JointTlm.TlmHeader.Msg);
     CFE_SB_TransmitMsg(&SimpleRobotAppData.JointTlm.TlmHeader.Msg, true);
 
@@ -369,7 +374,7 @@ void HighRateControLoop(void) {
     
     float errors[6];
     errors[0] = (SimpleRobotAppData.JointCmd.joint_goal.shoulder_pan_joint - SimpleRobotAppData.JointTlm.joint_state.shoulder_pan_joint);
-    errors[1] = (SimpleRobotAppData.JointCmd.joint_goal.shoulder_pan_joint - SimpleRobotAppData.JointTlm.joint_state.shoulder_lift_joint);
+    errors[1] = (SimpleRobotAppData.JointCmd.joint_goal.shoulder_lift_joint - SimpleRobotAppData.JointTlm.joint_state.shoulder_lift_joint);
     errors[2] = (SimpleRobotAppData.JointCmd.joint_goal.elbow_joint - SimpleRobotAppData.JointTlm.joint_state.elbow_joint);
     errors[3] = (SimpleRobotAppData.JointCmd.joint_goal.wrist_1_joint - SimpleRobotAppData.JointTlm.joint_state.wrist_1_joint);
     errors[4] = (SimpleRobotAppData.JointCmd.joint_goal.wrist_2_joint - SimpleRobotAppData.JointTlm.joint_state.wrist_2_joint);
@@ -381,9 +386,9 @@ void HighRateControLoop(void) {
     SimpleRobotAppData.JointTlm.joint_state.shoulder_pan_joint += + Kp * errors[0];
     SimpleRobotAppData.JointTlm.joint_state.shoulder_lift_joint += + Kp * errors[1];    
     SimpleRobotAppData.JointTlm.joint_state.elbow_joint += Kp * errors[2];    
-    SimpleRobotAppData.JointTlm.joint_state.wrist_1_joint += Kp * errors[4];        
-    SimpleRobotAppData.JointTlm.joint_state.wrist_2_joint += Kp * errors[5];
-    SimpleRobotAppData.JointTlm.joint_state.wrist_3_joint += Kp * errors[6];
+    SimpleRobotAppData.JointTlm.joint_state.wrist_1_joint += Kp * errors[3];        
+    SimpleRobotAppData.JointTlm.joint_state.wrist_2_joint += Kp * errors[4];
+    SimpleRobotAppData.JointTlm.joint_state.wrist_3_joint += Kp * errors[5];
               
 }
 
