@@ -21,7 +21,8 @@
 ** File: simple_robot_app_msg.h
 **
 ** Purpose:
-**  Define SimpleRobotApp Messages and info
+**  Define SimpleRobotApp Messages and info.
+**  These are the messages that will be translated to their ROS2 equivalents with the BRASH tools
 **
 ** Notes:
 **
@@ -34,7 +35,7 @@
  * SimpleRobotApp command codes
  */
 #define SIMPLE_ROBOT_APP_NOOP_CC        0
-#define SIMPLE_ROBOT_APP_MOVE_CC   1
+#define SIMPLE_ROBOT_APP_CMD_CC   1
 
 /*************************************************************************/
 
@@ -49,19 +50,18 @@ typedef struct
 
 typedef struct
 {
-  float joint_0;
-  float joint_1;
-  float joint_2;
-  float joint_3;
-  float joint_4;
-  float joint_5;
-  float joint_6;              
-} SimpleRobotAppJointState_t;
+  float shoulder_pan_joint;
+  float shoulder_lift_joint;
+  float elbow_joint;
+  float wrist_1_joint;
+  float wrist_2_joint;
+  float wrist_3_joint;
+} SimpleRobotAppJointConfig_t;
 
 typedef struct
 {
    CFE_MSG_CommandHeader_t CmdHeader;
-   uint8 pose_id;
+   SimpleRobotAppJointConfig_t joint_goal;
 } SimpleRobotAppCmd_t;
 
 /*
@@ -79,8 +79,7 @@ typedef struct
 {
     uint8 CommandErrorCounter;
     uint8 CommandCounter;
-    SimpleRobotAppJointState_t state;
-    bool is_robot_moving;
+    SimpleRobotAppJointConfig_t joint_state;
 } SimpleRobotAppHkTlmPayload_t;
 
 typedef struct
@@ -88,22 +87,6 @@ typedef struct
     CFE_MSG_TelemetryHeader_t  TlmHeader; /**< \brief Telemetry header */
     SimpleRobotAppHkTlmPayload_t Payload;   /**< \brief Telemetry payload */
 } SimpleRobotAppHkTlm_t;
-
-
-// These 2 messages are for communication with the robot on FSW side
-typedef struct
-{
-    CFE_MSG_TelemetryHeader_t  TlmHeader; /**< \brief Telemetry header */
-    SimpleRobotAppJointState_t goal; /**< Twist currently being applied **/
-
-} SimpleRobotAppRobotCommand_t;
-
-typedef struct
-{
-    CFE_MSG_CommandHeader_t  CmdHeader; /**< \brief Command header */
-    SimpleRobotAppJointState_t state; /**< Twist the robot is currently using **/
-    bool is_robot_moving;
-} SimpleRobotAppRobotState_t;
 
 
 #endif /* _simple_robot_app_msg_h_ */

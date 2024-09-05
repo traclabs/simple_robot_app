@@ -41,16 +41,16 @@
 ** global data
 */
 SimpleRobotAppData_t SimpleRobotAppData;
+
 struct robot_state_st{
-  SimpleRobotAppJointState_t state; /**< Twist the robot is currently using **/
+  SimpleRobotAppJointConfig_t state; /**< Twist the robot is currently using **/
   bool is_robot_moving;
 } lastRobotState;
-bool updated_command;
 
 void HighRateControLoop(void);
 
 /* * * * * * * * * * * * * * * * * * * * * * * * * * * * * * *  * *  * * * * **/
-/* SimpleRobotAppMain() -- Application entry point and main process loop         */
+/* SimpleRobotAppMain() -- Application entry point and main process loop      */
 /*                                                                            */
 /* * * * * * * * * * * * * * * * * * * * * * * * * * * * * * *  * *  * * * * **/
 void SimpleRobotAppMain(void)
@@ -115,20 +115,19 @@ void SimpleRobotAppMain(void)
 
 } /* End of SimpleRobotAppMain() */
 
-void fillJoints(SimpleRobotAppJointState_t *_joints, float j0, float j1, float j2, float j3, float j4, float j5, float j6)
+void fillJoints(SimpleRobotAppJointConfig_t *_joints, float j0, float j1, float j2, float j3, float j4, float j5)
 {
- _joints->joint_0 = j0;
- _joints->joint_1 = j1;
- _joints->joint_2 = j2;
- _joints->joint_3 = j3;
- _joints->joint_4 = j4;
- _joints->joint_5 = j5;
- _joints->joint_6 = j6;      
+ _joints->shoulder_pan_joint = j0;
+ _joints->shoulder_lift_joint = j1;
+ _joints->elbow_joint = j2;
+ _joints->wrist_1_joint = j3;
+ _joints->wrist_2_joint = j4;
+ _joints->wrist_3_joint = j5;
 }
 
 /* * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * *  */
 /*                                                                            */
-/* SimpleRobotAppInit() --  initialization                                       */
+/* SimpleRobotAppInit() --  initialization                                    */
 /*                                                                            */
 /* * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * **/
 int32 SimpleRobotAppInit(void)
@@ -145,14 +144,9 @@ int32 SimpleRobotAppInit(void)
     SimpleRobotAppData.square_counter = 0;
     SimpleRobotAppData.hk_counter = 0;
 
-    // updated
-    updated_command = false;
-
     // Initialize telemetry data back to ground
-    fillJoints(&SimpleRobotAppData.HkTlm.Payload.state, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0);
+    fillJoints(&SimpleRobotAppData.HkTlm.Payload.joint_state, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0);
       
-    SimpleRobotAppData.HkTlm.Payload.is_robot_moving = false;
-
     /*
     ** Initialize app configuration data
     */
@@ -190,7 +184,6 @@ int32 SimpleRobotAppInit(void)
     ** Initialize housekeeping packet (clear user data area).
     */
     CFE_MSG_Init(&SimpleRobotAppData.HkTlm.TlmHeader.Msg, CFE_SB_ValueToMsgId(SIMPLE_ROBOT_APP_HK_TLM_MID), sizeof(SimpleRobotAppData.HkTlm));
-    CFE_MSG_Init(&SimpleRobotAppData.FlightGoal.TlmHeader.Msg, CFE_SB_ValueToMsgId(SIMPLE_ROBOT_APP_ROBOT_CONTROL_MID), sizeof(SimpleRobotAppData.FlightGoal));
 
     /*
     ** Create Software Bus message pipe.
@@ -222,19 +215,6 @@ int32 SimpleRobotAppInit(void)
 
         return (status);
     }
-
-
-    /*
-    ** Subscribe to flight's robot state data
-    */
-    status = CFE_SB_Subscribe(CFE_SB_ValueToMsgId(SIMPLE_ROBOT_APP_ROBOT_STATE_MID), SimpleRobotAppData.CommandPipe);
-    if (status != CFE_SUCCESS)
-    {
-        CFE_ES_WriteToSysLog("SimpleRobotApp: Error Subscribing to Odom data, RC = 0x%08lX\n", (unsigned long)status);
-
-        return (status);
-    }
-
     
     /*
     ** Subscribe to High Rate wakeup for sending robot commands on the flight side
@@ -270,18 +250,17 @@ void SimpleRobotAppProcessCommandPacket(CFE_SB_Buffer_t *SBBufPtr)
     CFE_MSG_GetMsgId(&SBBufPtr->Msg, &MsgId);
     switch (CFE_SB_MsgIdToValue(MsgId))
     {
+        // Command is being received from ground!
         case SIMPLE_ROBOT_APP_CMD_MID:
             SimpleRobotAppProcessGroundCommand(SBBufPtr);
             break;
 
+        // Our app is being asked to send back telemetry data!
         case SIMPLE_ROBOT_APP_SEND_HK_MID:
             SimpleRobotAppReportHousekeeping((CFE_MSG_CommandHeader_t *)SBBufPtr);
             break;
 
-        case SIMPLE_ROBOT_APP_ROBOT_STATE_MID:
-            SimpleRobotAppProcessRobotState(SBBufPtr);
-            break;
-
+        // Our app receives a pretty fast clock (1000Hz) to perform a control loop
         case SIMPLE_ROBOT_APP_HR_CONTROL_MID:
             HighRateControLoop();
             break;
@@ -323,10 +302,9 @@ void SimpleRobotAppProcessGroundCommand(CFE_SB_Buffer_t *SBBufPtr)
 
             break;
 
-        case SIMPLE_ROBOT_APP_MOVE_CC:
+        case SIMPLE_ROBOT_APP_CMD_CC:
             if (SimpleRobotAppVerifyCmdLength(&SBBufPtr->Msg, sizeof(SimpleRobotAppCmd_t)))
             {
-                OS_printf("Updating robot command!!!!!!!!!!!!!!!");
                 updateRobotCommand((SimpleRobotAppCmd_t *)SBBufPtr);
             }
 
@@ -344,35 +322,9 @@ void SimpleRobotAppProcessGroundCommand(CFE_SB_Buffer_t *SBBufPtr)
 
 } /* End of SimpleRobotAppProcessGroundCommand() */
 
-/* * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * **/
-/*                                                                            */
-/* SimpleRobotAppProcessRobotState() -- SimpleRobotApp arm state                   */
-/*                                                                            */
-/* * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * **/
-void SimpleRobotAppProcessRobotState(CFE_SB_Buffer_t *SBBufPtr)
-{
-    CFE_MSG_FcnCode_t CommandCode = 0;
-
-    CFE_MSG_GetFcnCode(&SBBufPtr->Msg, &CommandCode);
-
-    // Read
-    if (SimpleRobotAppVerifyCmdLength(&SBBufPtr->Msg, sizeof(SimpleRobotAppRobotState_t)))
-    {
-       SimpleRobotAppRobotState_t* state = (SimpleRobotAppRobotState_t *)SBBufPtr;
-       
-       // Fill the lastState
-       lastRobotState.state = state->state;
-       lastRobotState.is_robot_moving = state->is_robot_moving;                     
-    }
-
-
-    return;
-
-} /* End of SimpleRobotAppProcessRobotState() */
-
 
 /* * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * **/
-/*  Name:  SimpleRobotAppReportHousekeeping                                          */
+/*  Name:  SimpleRobotAppReportHousekeeping                                   */
 /*                                                                            */
 /*  Purpose:                                                                  */
 /*         This function is triggered in response to a task telemetry request */
@@ -416,32 +368,15 @@ int32 SimpleRobotAppNoop(const SimpleRobotAppNoopCmd_t *Msg)
 
 int32 updateRobotCommand(const SimpleRobotAppCmd_t *Msg)
 {
-                OS_printf("Updating robot command inside......");
-
-    fillJoints(&SimpleRobotAppData.FlightGoal.goal, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0);
-   
-   switch(Msg->pose_id)
-   {
-     // Open
-     case 0:
-     {
-        fillJoints(&SimpleRobotAppData.FlightGoal.goal, 0.0, 0.0, 0.0, -3.1416, 0.0, 0.0, 0.0);
-     } break;
-     // All zeros
-     case 1:
-     {} break;
-     // Random
-     case 2:
-     {
-        fillJoints(&SimpleRobotAppData.FlightGoal.goal, 1.0, -1.5, 3.0, -3.2, 0.8, 0.5, -1.0);
-
-     } break;       
-   }
-
-    updated_command = true;
-
-    CFE_EVS_SendEvent(SIMPLE_ROBOT_APP_COMMANDMODE_INF_EID, CFE_EVS_EventType_INFORMATION, "SimpleRobotApp: Received command %s",
-                      SIMPLE_ROBOT_APP_VERSION);
+   SimpleRobotAppData.JointCmd.joint_goal.shoulder_pan_joint = Msg->joint_goal.shoulder_pan_joint;
+   SimpleRobotAppData.JointCmd.joint_goal.shoulder_lift_joint = Msg->joint_goal.shoulder_lift_joint;
+   SimpleRobotAppData.JointCmd.joint_goal.elbow_joint = Msg->joint_goal.elbow_joint;
+   SimpleRobotAppData.JointCmd.joint_goal.wrist_1_joint = Msg->joint_goal.wrist_1_joint;
+   SimpleRobotAppData.JointCmd.joint_goal.wrist_2_joint = Msg->joint_goal.wrist_2_joint;
+   SimpleRobotAppData.JointCmd.joint_goal.wrist_3_joint = Msg->joint_goal.wrist_3_joint;
+            
+   CFE_EVS_SendEvent(SIMPLE_ROBOT_APP_COMMANDMODE_INF_EID, CFE_EVS_EventType_INFORMATION, "SimpleRobotApp: Received command %s",
+                     SIMPLE_ROBOT_APP_VERSION);
 
     return CFE_SUCCESS;
     
@@ -449,33 +384,29 @@ int32 updateRobotCommand(const SimpleRobotAppCmd_t *Msg)
 
 void HighRateControLoop(void) {
     
-    // 1. Publish the twist to State in rosfsw (it is like sending a command to the robot)
-    // (we should use another name, telemetry is not supposed to command anything)
+    float errors[6];
+    errors[0] = (SimpleRobotAppData.JointCmd.joint_goal.shoulder_pan_joint - SimpleRobotAppData.HkTlm.Payload.joint_state.shoulder_pan_joint);
+    errors[1] = (SimpleRobotAppData.JointCmd.joint_goal.shoulder_pan_joint - SimpleRobotAppData.HkTlm.Payload.joint_state.shoulder_lift_joint);
+    errors[2] = (SimpleRobotAppData.JointCmd.joint_goal.elbow_joint - SimpleRobotAppData.HkTlm.Payload.joint_state.elbow_joint);
+    errors[3] = (SimpleRobotAppData.JointCmd.joint_goal.wrist_1_joint - SimpleRobotAppData.HkTlm.Payload.joint_state.wrist_1_joint);
+    errors[4] = (SimpleRobotAppData.JointCmd.joint_goal.wrist_2_joint - SimpleRobotAppData.HkTlm.Payload.joint_state.wrist_2_joint);
+    errors[5] = (SimpleRobotAppData.JointCmd.joint_goal.wrist_3_joint - SimpleRobotAppData.HkTlm.Payload.joint_state.wrist_3_joint);
 
-    if (updated_command)    
-    {
-    CFE_SB_TimeStampMsg(&SimpleRobotAppData.FlightGoal.TlmHeader.Msg);
-    CFE_SB_TransmitMsg(&SimpleRobotAppData.FlightGoal.TlmHeader.Msg, true);
-    updated_command = false;    
-    }
-
- 
-    
-    // 2. Update the telemetry information to be sent back to the ground        
-    struct robot_state_st *st = &lastRobotState;
-
-    SimpleRobotAppData.HkTlm.Payload.state = st->state;
-    SimpleRobotAppData.HkTlm.Payload.is_robot_moving  = st->is_robot_moving;
-
-    // This data is sent when a Housekeeping request is received, 
-    // (usually, at a low rate) so nothing sent here
-    //memcpy(&st->joints, &SimpleRobotAppData.HkTlm.Payload.state, sizeof(SimpleRobotAppSSRMS_t) );
-    
+    // Update state (telemetry) stored. It will be sent back to a lower rate
+    // (when a Housekeeping request is received)
+    float Kp = 0.01;
+    SimpleRobotAppData.HkTlm.Payload.joint_state.shoulder_pan_joint += + Kp * errors[0];
+    SimpleRobotAppData.HkTlm.Payload.joint_state.shoulder_lift_joint += + Kp * errors[1];    
+    SimpleRobotAppData.HkTlm.Payload.joint_state.elbow_joint += Kp * errors[2];    
+    SimpleRobotAppData.HkTlm.Payload.joint_state.wrist_1_joint += Kp * errors[4];        
+    SimpleRobotAppData.HkTlm.Payload.joint_state.wrist_2_joint += Kp * errors[5];
+    SimpleRobotAppData.HkTlm.Payload.joint_state.wrist_3_joint += Kp * errors[6];
+              
 }
 
 /* * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * **/
 /*                                                                            */
-/* SimpleRobotAppVerifyCmdLength() -- Verify command packet length                   */
+/* SimpleRobotAppVerifyCmdLength() -- Verify command packet length            */
 /*                                                                            */
 /* * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * **/
 bool SimpleRobotAppVerifyCmdLength(CFE_MSG_Message_t *MsgPtr, size_t ExpectedLength)

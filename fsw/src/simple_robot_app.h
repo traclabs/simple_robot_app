@@ -65,10 +65,10 @@ typedef struct
     uint32 square_counter;
     uint32 hk_counter;
 
-    //Housekeeping telemetry packet...
+    //Housekeeping telemetry packet sent back to ground
     SimpleRobotAppHkTlm_t HkTlm;
-    // Goal joint state sent to robot on flight side
-    SimpleRobotAppRobotCommand_t FlightGoal;
+    // Command joint goal received from ground
+    SimpleRobotAppCmd_t JointCmd;
     
     // Run Status variable used in the main processing loop
     uint32 RunStatus;
@@ -109,6 +109,6 @@ int32 SimpleRobotAppNoop(const SimpleRobotAppNoopCmd_t *Msg);
 int32 updateRobotCommand(const SimpleRobotAppCmd_t *Msg);
 
 bool SimpleRobotAppVerifyCmdLength(CFE_MSG_Message_t *MsgPtr, size_t ExpectedLength);
-void fillJoints(SimpleRobotAppJointState_t *_joints, float j0, float j1, float j2, float j3, float j4, float j5, float j6);
+void fillJoints(SimpleRobotAppJointConfig_t *_joints, float j0, float j1, float j2, float j3, float j4, float j5);
 
 #endif /* _SIMPLE_ROBOT_APP_h_ */
