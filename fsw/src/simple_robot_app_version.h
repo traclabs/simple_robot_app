@@ -41,7 +41,7 @@
  * official version. @n See @ref cfsversions for format differences between development and release versions.
  */
 #define SIMPLE_ROBOT_APP_VERSION_STRING                       \
-    " CANADARM APP DEVELOPMENT BUILD " SIMPLE_ROBOT_APP_VERSION \
+    " SIMPLE ROBOT APP DEVELOPMENT BUILD " SIMPLE_ROBOT_APP_VERSION \
     ", Last Official Release: v1.1.0" /* For full support please use this version */
 
 #endif /* SIMPLE_ROBOT_APP_VERSION_H */

@@ -77,16 +77,9 @@ typedef SimpleRobotAppNoArgsCmd_t SimpleRobotAppNoopCmd_t;
 
 typedef struct
 {
-    uint8 CommandErrorCounter;
-    uint8 CommandCounter;
-    SimpleRobotAppJointConfig_t joint_state;
-} SimpleRobotAppHkTlmPayload_t;
-
-typedef struct
-{
     CFE_MSG_TelemetryHeader_t  TlmHeader; /**< \brief Telemetry header */
-    SimpleRobotAppHkTlmPayload_t Payload;   /**< \brief Telemetry payload */
-} SimpleRobotAppHkTlm_t;
+    SimpleRobotAppJointConfig_t joint_state;   /**< \brief Telemetry payload */
+} SimpleRobotAppTlm_t;
 
 
 #endif /* _simple_robot_app_msg_h_ */
