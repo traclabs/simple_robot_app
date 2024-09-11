@@ -176,9 +176,15 @@ int32 SimpleRobotAppInit(void)
     }
 
     /*
-    ** Initialize housekeeping packet (clear user data area).
+    ** (GROUND TLM) Initialize housekeeping packet (clear user data area).
     */
     CFE_MSG_Init(&SimpleRobotAppData.JointTlm.TlmHeader.Msg, CFE_SB_ValueToMsgId(SIMPLE_ROBOT_APP_HK_TLM_MID), sizeof(SimpleRobotAppData.JointTlm));
+
+    /*
+    ** (FLIGHT CMD) Initialize command data to be sent to robot.
+    */
+    CFE_MSG_Init(&SimpleRobotAppData.FlightJointCmd.TlmHeader.Msg, CFE_SB_ValueToMsgId(SIMPLE_ROBOT_APP_FLIGHT_CMD_MID), sizeof(SimpleRobotAppData.FlightJointCmd));
+
 
     /*
     ** Create Software Bus message pipe.
@@ -201,7 +207,7 @@ int32 SimpleRobotAppInit(void)
     }
 
     /*
-    ** Subscribe to ground command packets
+    ** (GROUND CMD) Subscribe to ground command packets
     */
     status = CFE_SB_Subscribe(CFE_SB_ValueToMsgId(SIMPLE_ROBOT_APP_CMD_MID), SimpleRobotAppData.CommandPipe);
     if (status != CFE_SUCCESS)
@@ -210,6 +216,18 @@ int32 SimpleRobotAppInit(void)
 
         return (status);
     }
+
+    /*
+    ** (FLIGHT TLM) Subscribe to robot's state
+    */
+    status = CFE_SB_Subscribe(CFE_SB_ValueToMsgId(SIMPLE_ROBOT_APP_FLIGHT_TLM_MID), SimpleRobotAppData.CommandPipe);
+    if (status != CFE_SUCCESS)
+    {
+        CFE_ES_WriteToSysLog("SimpleRobotApp: Error Subscribing to Flight's side robot-state, RC = 0x%08lX\n", (unsigned long)status);
+
+        return (status);
+    }
+
     
     /*
     ** Subscribe to High Rate wakeup for sending robot commands on the flight side
@@ -245,7 +263,7 @@ void SimpleRobotAppProcessCommandPacket(CFE_SB_Buffer_t *SBBufPtr)
     CFE_MSG_GetMsgId(&SBBufPtr->Msg, &MsgId);
     switch (CFE_SB_MsgIdToValue(MsgId))
     {
-        // Command is being received from ground!
+        // (GROUND) Command is being received from ground!
         case SIMPLE_ROBOT_APP_CMD_MID:
             SimpleRobotAppProcessGroundCommand(SBBufPtr);
             break;
@@ -255,10 +273,16 @@ void SimpleRobotAppProcessCommandPacket(CFE_SB_Buffer_t *SBBufPtr)
             SimpleRobotAppReportHousekeeping((CFE_MSG_CommandHeader_t *)SBBufPtr);
             break;
 
-        // Our app receives a pretty fast clock (1000Hz) to perform a control loop
+        // Our app receives a pretty fast clock (10Hz) to perform a control loop
         case SIMPLE_ROBOT_APP_HR_CONTROL_MID:
             HighRateControLoop();
             break;
+
+        // (FLIGHT) Robot state is being received from robot on the flight side!
+        case SIMPLE_ROBOT_APP_FLIGHT_TLM_MID:
+            SimpleRobotAppProcessFlightData(SBBufPtr);
+            break;
+
             
         default:
             CFE_EVS_SendEvent(SIMPLE_ROBOT_APP_INVALID_MSGID_ERR_EID, CFE_EVS_EventType_ERROR,
@@ -342,6 +366,31 @@ int32 SimpleRobotAppReportHousekeeping(const CFE_MSG_CommandHeader_t *Msg)
 
 /* * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * **/
 /*                                                                            */
+/* SimpleRobotAppProcessFlightData()                                          */
+/* Get data from flight robot and store it to send back to ground             */
+/*                                                                            */
+/* * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * **/
+void SimpleRobotAppProcessFlightData(CFE_SB_Buffer_t *SBBufPtr)
+{
+    CFE_MSG_FcnCode_t CommandCode = 0;
+
+    CFE_MSG_GetFcnCode(&SBBufPtr->Msg, &CommandCode);
+
+    //OS_printf("SimpleRobotAppProcessFlightData() -- we're getting data from robot...%d\n", CommandCode);
+
+    if (SimpleRobotAppVerifyCmdLength(&SBBufPtr->Msg, sizeof(SimpleRobotAppFlightTlm_t)))
+    {
+       SimpleRobotAppData.FlightJointTlm = *(SimpleRobotAppFlightTlm_t *)SBBufPtr;
+       SimpleRobotAppData.JointTlm.joint_state = SimpleRobotAppData.FlightJointTlm.joint_state; 
+    }
+
+    return;
+
+} /* End of SimpleRobotAppProcessGroundCommand() */
+
+
+/* * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * **/
+/*                                                                            */
 /* SimpleRobotAppNoop -- ROS NOOP commands                                          */
 /*                                                                            */
 /* * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * **/
@@ -363,6 +412,11 @@ int32 updateRobotCommand(const SimpleRobotAppCmd_t *Msg)
    SimpleRobotAppData.JointCmd.joint_goal.wrist_2_joint = Msg->joint_goal.wrist_2_joint;
    SimpleRobotAppData.JointCmd.joint_goal.wrist_3_joint = Msg->joint_goal.wrist_3_joint;
             
+   // Here you can do anything you want before sending the joint command to the robot on the flight side
+   // for instance, you could check that the values are within a limit
+   SimpleRobotAppData.FlightJointCmd.joint_goal = SimpleRobotAppData.JointCmd.joint_goal;
+   SimpleRobotAppData.FlightJointCmd.max_time = 5.0; // just to put something         
+            
    CFE_EVS_SendEvent(SIMPLE_ROBOT_APP_COMMANDMODE_INF_EID, CFE_EVS_EventType_INFORMATION, "SimpleRobotApp: Received command %s",
                      SIMPLE_ROBOT_APP_VERSION);
 
@@ -372,24 +426,9 @@ int32 updateRobotCommand(const SimpleRobotAppCmd_t *Msg)
 
 void HighRateControLoop(void) {
     
-    float errors[6];
-    errors[0] = (SimpleRobotAppData.JointCmd.joint_goal.shoulder_pan_joint - SimpleRobotAppData.JointTlm.joint_state.shoulder_pan_joint);
-    errors[1] = (SimpleRobotAppData.JointCmd.joint_goal.shoulder_lift_joint - SimpleRobotAppData.JointTlm.joint_state.shoulder_lift_joint);
-    errors[2] = (SimpleRobotAppData.JointCmd.joint_goal.elbow_joint - SimpleRobotAppData.JointTlm.joint_state.elbow_joint);
-    errors[3] = (SimpleRobotAppData.JointCmd.joint_goal.wrist_1_joint - SimpleRobotAppData.JointTlm.joint_state.wrist_1_joint);
-    errors[4] = (SimpleRobotAppData.JointCmd.joint_goal.wrist_2_joint - SimpleRobotAppData.JointTlm.joint_state.wrist_2_joint);
-    errors[5] = (SimpleRobotAppData.JointCmd.joint_goal.wrist_3_joint - SimpleRobotAppData.JointTlm.joint_state.wrist_3_joint);
-
-    // Update state (telemetry) stored. It will be sent back to a lower rate
-    // (when a Housekeeping request is received)
-    float Kp = 0.01;
-    SimpleRobotAppData.JointTlm.joint_state.shoulder_pan_joint += + Kp * errors[0];
-    SimpleRobotAppData.JointTlm.joint_state.shoulder_lift_joint += + Kp * errors[1];    
-    SimpleRobotAppData.JointTlm.joint_state.elbow_joint += Kp * errors[2];    
-    SimpleRobotAppData.JointTlm.joint_state.wrist_1_joint += Kp * errors[3];        
-    SimpleRobotAppData.JointTlm.joint_state.wrist_2_joint += Kp * errors[4];
-    SimpleRobotAppData.JointTlm.joint_state.wrist_3_joint += Kp * errors[5];
-              
+    // Send command to robot on flight side (cFS -> robot)
+    CFE_SB_TimeStampMsg(&SimpleRobotAppData.FlightJointCmd.TlmHeader.Msg);
+    CFE_SB_TransmitMsg(&SimpleRobotAppData.FlightJointCmd.TlmHeader.Msg, true);    
 }
 
 /* * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * **/

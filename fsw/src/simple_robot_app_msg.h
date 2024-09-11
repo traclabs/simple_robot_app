@@ -82,6 +82,24 @@ typedef struct
 } SimpleRobotAppTlm_t;
 
 
+/////////////////////////////
+// Flight side
+/////////////////////////////
+typedef struct
+{
+  CFE_MSG_TelemetryHeader_t  TlmHeader; /**< \brief Telemetry header */
+  SimpleRobotAppJointConfig_t joint_goal;   /**< \brief Command */
+  float max_time;
+} SimpleRobotAppFlightCmd_t;
+
+typedef struct
+{
+  CFE_MSG_CommandHeader_t  CmdHeader; /**< \brief Telemetry header */
+  SimpleRobotAppJointConfig_t joint_state;   /**< \brief Command */
+  bool is_robot_moving;
+} SimpleRobotAppFlightTlm_t;
+
+
 #endif /* _simple_robot_app_msg_h_ */
 
 /************************/
